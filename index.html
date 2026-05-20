@@ -305,6 +305,31 @@
 
     label { font-size: .76rem; font-weight: 600; color: var(--text-muted); }
 
+    input[type=time] {
+      padding: 9px 12px;
+      border: 1.5px solid var(--border);
+      border-radius: var(--radius-sm);
+      font-size: .9rem;
+      color: var(--text);
+      background: white;
+      transition: border-color .15s, box-shadow .15s;
+      outline: none;
+      width: 100%;
+    }
+
+    .time-range {
+      font-size: .88rem;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+    .time-dur {
+      font-size: .75rem;
+      color: var(--text-muted);
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+
     input[type=text], input[type=number], input[type=password] {
       padding: 9px 12px;
       border: 1.5px solid var(--border);
@@ -519,11 +544,12 @@
           <input type="text" id="desc" placeholder="Was hast du gemacht?" autocomplete="off">
         </div>
         <div class="form-group">
-          <label>Dauer</label>
-          <div class="time-row">
-            <input type="number" id="hours"   placeholder="Stunden" min="0" max="23">
-            <input type="number" id="minutes" placeholder="Minuten" min="0" max="59">
-          </div>
+          <label for="startTime">Von</label>
+          <input type="time" id="startTime">
+        </div>
+        <div class="form-group">
+          <label for="endTime">Bis</label>
+          <input type="time" id="endTime">
         </div>
         <div class="form-group">
           <label for="category">Kategorie / Projekt</label>
@@ -662,11 +688,15 @@
     let totalMin = 0;
     const html = entries.map(e => {
       totalMin += (parseInt(e.hours) || 0) * 60 + (parseInt(e.minutes) || 0);
+      const rangeHtml = (e.startTime && e.endTime)
+        ? '<div class="time-range">' + esc(e.startTime) + ' – ' + esc(e.endTime) + '</div>' +
+          '<div class="time-dur">' + fmtDur(e.hours, e.minutes) + '</div>'
+        : '<div class="time-range">' + fmtDur(e.hours, e.minutes) + '</div>';
       return (
         '<div class="entry-row">' +
           '<span class="entry-category" title="' + esc(e.category) + '">' + esc(e.category) + '</span>' +
           '<span class="entry-desc">'   + esc(e.description) + '</span>' +
-          '<span class="entry-time">'   + fmtDur(e.hours, e.minutes) + '</span>' +
+          '<div class="entry-time">'    + rangeHtml + '</div>' +
           '<button class="btn-delete" data-id="' + esc(e.id) + '" title="Löschen">✕</button>' +
         '</div>'
       );
@@ -707,12 +737,24 @@
 
   // ── CRUD ────────────────────────────────────────────────
   async function addEntry() {
-    const desc     = document.getElementById('desc').value.trim();
-    const hours    = parseInt(document.getElementById('hours').value)   || 0;
-    const minutes  = parseInt(document.getElementById('minutes').value) || 0;
-    const category = document.getElementById('category').value.trim()  || 'Allgemein';
+    const desc      = document.getElementById('desc').value.trim();
+    const startTime = document.getElementById('startTime').value;
+    const endTime   = document.getElementById('endTime').value;
+    const category  = document.getElementById('category').value.trim() || 'Allgemein';
 
     if (!desc) { document.getElementById('desc').focus(); return; }
+    if (!startTime || !endTime) {
+      alert('Bitte "Von" und "Bis" Zeit angeben.');
+      return;
+    }
+
+    // Dauer aus Von/Bis berechnen
+    const [sh, sm] = startTime.split(':').map(Number);
+    const [eh, em] = endTime.split(':').map(Number);
+    let diffMin = (eh * 60 + em) - (sh * 60 + sm);
+    if (diffMin < 0) diffMin += 24 * 60; // über Mitternacht
+    const hours   = Math.floor(diffMin / 60);
+    const minutes = diffMin % 60;
 
     const btn = document.getElementById('addBtn');
     btn.disabled = true; btn.textContent = 'Speichern…';
@@ -722,6 +764,7 @@
     allData[key].push({
       id:          Date.now().toString(36) + Math.random().toString(36).slice(2,6),
       description: desc,
+      startTime, endTime,
       hours, minutes, category,
       createdAt:   new Date().toISOString()
     });
@@ -729,10 +772,10 @@
     renderCurrentDay();
     await saveData();
 
-    document.getElementById('desc').value     = '';
-    document.getElementById('hours').value    = '';
-    document.getElementById('minutes').value  = '';
-    document.getElementById('category').value = '';
+    document.getElementById('desc').value      = '';
+    document.getElementById('startTime').value = '';
+    document.getElementById('endTime').value   = '';
+    document.getElementById('category').value  = '';
     document.getElementById('desc').focus();
 
     btn.disabled = false; btn.textContent = '+ Eintrag hinzufügen';
@@ -822,7 +865,7 @@
   document.getElementById('addBtn').addEventListener('click', addEntry);
   document.getElementById('resetBtn').addEventListener('click', resetToken);
 
-  ['desc','hours','minutes','category'].forEach(id =>
+  ['desc','startTime','endTime','category'].forEach(id =>
     document.getElementById(id).addEventListener('keydown', e => { if (e.key === 'Enter') addEntry(); })
   );
 
