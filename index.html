@@ -812,6 +812,17 @@
       // Validate token
       await gh('GET', '/user');
 
+      // Gespeicherte Gist-ID prüfen — falls gelöscht, neu suchen
+      if (gistId) {
+        try {
+          await gh('GET', '/gists/' + gistId);
+        } catch(e) {
+          // Gist existiert nicht mehr → neu suchen
+          gistId = null;
+          localStorage.removeItem(LS_GIST_ID);
+        }
+      }
+
       // Vorhandenes Gist suchen oder neues erstellen
       if (!gistId) {
         const allGists = await gh('GET', '/gists?per_page=100');
@@ -819,7 +830,7 @@
           g.description === 'Arbeitsstunden-Tracker – Daten' && g.files[GIST_FILE]
         );
         if (existing) {
-          gistId = existing.id;  // vorhandenes Gist wiederverwenden
+          gistId = existing.id;
         } else {
           const gist = await gh('POST', '/gists', {
             description: 'Arbeitsstunden-Tracker – Daten',
