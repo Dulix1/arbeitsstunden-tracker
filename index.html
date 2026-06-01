@@ -370,7 +370,7 @@
     /* Entries */
     .entry-row {
       display: grid;
-      grid-template-columns: auto 1fr auto auto;
+      grid-template-columns: auto 1fr auto auto auto;
       gap: 12px;
       align-items: center;
       padding: 13px 20px;
@@ -410,10 +410,9 @@
       font-variant-numeric: tabular-nums;
     }
 
-    .btn-delete {
+    .btn-delete, .btn-edit {
       background: none;
       border: none;
-      color: var(--border);
       cursor: pointer;
       padding: 5px 6px;
       border-radius: 6px;
@@ -421,7 +420,10 @@
       font-size: .85rem;
       line-height: 1;
     }
+    .btn-delete { color: var(--border); }
     .btn-delete:hover { color: var(--danger); background: var(--danger-light); }
+    .btn-edit { color: var(--border); }
+    .btn-edit:hover { color: var(--primary); background: var(--primary-light); }
 
     /* State boxes */
     .state-box {
@@ -440,11 +442,33 @@
       padding: 18px 24px;
       display: flex;
       align-items: center;
-      justify-content: space-between;
+      justify-content: space-around;
+      gap: 16px;
       box-shadow: 0 4px 14px rgba(37,99,235,.28);
     }
-    .summary-label { font-size: .82rem; font-weight: 600; opacity: .8; }
-    .summary-total { font-size: 1.65rem; font-weight: 800; letter-spacing: -.5px; }
+    .summary-item { text-align: center; flex: 1; }
+    .summary-divider { width: 1px; background: rgba(255,255,255,.3); align-self: stretch; min-height: 40px; }
+    .summary-label { font-size: .78rem; font-weight: 600; opacity: .75; margin-bottom: 2px; }
+    .summary-total { font-size: 1.55rem; font-weight: 800; letter-spacing: -.5px; }
+
+    /* Cancel edit button */
+    .btn-cancel {
+      background: none;
+      border: 1.5px solid var(--border);
+      color: var(--text-muted);
+      padding: 10px 16px;
+      border-radius: var(--radius-sm);
+      font-size: .88rem;
+      font-weight: 600;
+      cursor: pointer;
+      width: 100%;
+      transition: border-color .15s, color .15s;
+      margin-bottom: 8px;
+    }
+    .btn-cancel:hover { border-color: var(--danger); color: var(--danger); }
+
+    /* Editing highlight */
+    .editing-mode .card-header { color: var(--primary); }
 
     /* Footer */
     .app-footer {
@@ -537,7 +561,7 @@
   <main>
     <!-- Form -->
     <div class="card">
-      <div class="card-header">Neuer Eintrag</div>
+      <div class="card-header" id="formCardHeader">Neuer Eintrag</div>
       <div class="form-grid">
         <div class="form-group full">
           <label for="desc">Beschreibung</label>
@@ -566,6 +590,7 @@
         </div>
       </div>
       <div class="form-footer">
+        <button class="btn-cancel" id="cancelEditBtn" style="display:none">✕ Bearbeitung abbrechen</button>
         <button class="btn-primary" id="addBtn">+ Eintrag hinzufügen</button>
       </div>
     </div>
@@ -580,8 +605,15 @@
 
     <!-- Summary -->
     <div class="summary" id="summary" style="display:none">
-      <div class="summary-label">Gesamtzeit heute</div>
-      <div class="summary-total" id="summaryTotal">0:00 h</div>
+      <div class="summary-item">
+        <div class="summary-label">Heute</div>
+        <div class="summary-total" id="summaryTotal">0:00 h</div>
+      </div>
+      <div class="summary-divider"></div>
+      <div class="summary-item">
+        <div class="summary-label">Diese Woche</div>
+        <div class="summary-total" id="summaryWeek">0:00 h</div>
+      </div>
     </div>
   </main>
 
@@ -602,6 +634,7 @@
   let allData     = {};   // { "YYYY-MM-DD": [ ...entries ] }
   let currentDate = new Date();
   let saving      = false;
+  let editingId   = null;
 
   // ── GitHub API helper ───────────────────────────────────
   async function gh(method, path, body) {
@@ -635,6 +668,33 @@
   }
 
   function isToday(d) { return toKey(d) === toKey(new Date()); }
+
+  // ── Week helpers ─────────────────────────────────────────
+  function getWeekStart(d) {
+    const day = d.getDay(); // 0=So, 1=Mo...
+    const diff = (day === 0) ? -6 : 1 - day;
+    const mon = new Date(d);
+    mon.setDate(d.getDate() + diff);
+    mon.setHours(0,0,0,0);
+    return mon;
+  }
+
+  function calcWeekTotal() {
+    const weekStart = getWeekStart(currentDate);
+    const weekEnd   = new Date(weekStart);
+    weekEnd.setDate(weekStart.getDate() + 6);
+    weekEnd.setHours(23,59,59,999);
+    let totalMin = 0;
+    for (const key in allData) {
+      const d = new Date(key + 'T12:00:00');
+      if (d >= weekStart && d <= weekEnd) {
+        for (const e of allData[key]) {
+          totalMin += (parseInt(e.hours) || 0) * 60 + (parseInt(e.minutes) || 0);
+        }
+      }
+    }
+    return totalMin;
+  }
 
   // ── Sync helpers ────────────────────────────────────────
   function showSync(on) {
@@ -730,11 +790,13 @@
         ? '<div class="time-range">' + esc(e.startTime) + ' – ' + esc(e.endTime) + '</div>' +
           '<div class="time-dur">' + fmtDur(e.hours, e.minutes) + '</div>'
         : '<div class="time-range">' + fmtDur(e.hours, e.minutes) + '</div>';
+      const isEditing = e.id === editingId;
       return (
-        '<div class="entry-row">' +
+        '<div class="entry-row" style="' + (isEditing ? 'background:#EFF6FF;' : '') + '">' +
           '<span class="entry-category" title="' + esc(e.category) + '">' + esc(e.category) + '</span>' +
           '<span class="entry-desc">'   + esc(e.description) + '</span>' +
           '<div class="entry-time">'    + rangeHtml + '</div>' +
+          '<button class="btn-edit"   data-id="' + esc(e.id) + '" title="Bearbeiten">✎</button>' +
           '<button class="btn-delete" data-id="' + esc(e.id) + '" title="Löschen">✕</button>' +
         '</div>'
       );
@@ -742,11 +804,22 @@
 
     container.innerHTML = html;
 
-    const h = Math.floor(totalMin / 60);
-    const m = totalMin % 60;
-    document.getElementById('summaryTotal').textContent = h + ':' + String(m).padStart(2, '0') + ' h';
+    // Daily total
+    const dh = Math.floor(totalMin / 60);
+    const dm = totalMin % 60;
+    document.getElementById('summaryTotal').textContent = dh + ':' + String(dm).padStart(2, '0') + ' h';
+
+    // Weekly total
+    const weekMin = calcWeekTotal();
+    const wh = Math.floor(weekMin / 60);
+    const wm = weekMin % 60;
+    document.getElementById('summaryWeek').textContent = wh + ':' + String(wm).padStart(2, '0') + ' h';
+
     summary.style.display = 'flex';
 
+    container.querySelectorAll('.btn-edit').forEach(btn =>
+      btn.addEventListener('click', () => editEntry(btn.dataset.id))
+    );
     container.querySelectorAll('.btn-delete').forEach(btn =>
       btn.addEventListener('click', () => {
         if (confirm('Diesen Eintrag wirklich löschen?')) deleteEntry(btn.dataset.id);
@@ -774,6 +847,17 @@
   }
 
   // ── CRUD ────────────────────────────────────────────────
+  function clearForm() {
+    document.getElementById('desc').value      = '';
+    document.getElementById('startTime').value = '';
+    document.getElementById('endTime').value   = '';
+    document.getElementById('category').value  = '';
+    document.getElementById('formCardHeader').textContent = 'Neuer Eintrag';
+    document.getElementById('addBtn').textContent = '+ Eintrag hinzufügen';
+    document.getElementById('cancelEditBtn').style.display = 'none';
+    editingId = null;
+  }
+
   async function addEntry() {
     const desc      = document.getElementById('desc').value.trim();
     const startTime = document.getElementById('startTime').value;
@@ -781,16 +865,12 @@
     const category  = document.getElementById('category').value.trim() || 'Allgemein';
 
     if (!desc) { document.getElementById('desc').focus(); return; }
-    if (!startTime || !endTime) {
-      alert('Bitte "Von" und "Bis" Zeit angeben.');
-      return;
-    }
+    if (!startTime || !endTime) { alert('Bitte "Von" und "Bis" Zeit angeben.'); return; }
 
-    // Dauer aus Von/Bis berechnen
     const [sh, sm] = startTime.split(':').map(Number);
     const [eh, em] = endTime.split(':').map(Number);
     let diffMin = (eh * 60 + em) - (sh * 60 + sm);
-    if (diffMin < 0) diffMin += 24 * 60; // über Mitternacht
+    if (diffMin < 0) diffMin += 24 * 60;
     const hours   = Math.floor(diffMin / 60);
     const minutes = diffMin % 60;
 
@@ -799,27 +879,53 @@
 
     const key = toKey(currentDate);
     if (!allData[key]) allData[key] = [];
-    allData[key].push({
-      id:          Date.now().toString(36) + Math.random().toString(36).slice(2,6),
-      description: desc,
-      startTime, endTime,
-      hours, minutes, category,
-      createdAt:   new Date().toISOString()
-    });
 
+    if (editingId) {
+      // Eintrag aktualisieren
+      const idx = allData[key].findIndex(e => e.id === editingId);
+      if (idx !== -1) {
+        allData[key][idx] = { ...allData[key][idx], description: desc, startTime, endTime, hours, minutes, category };
+      }
+    } else {
+      // Neuer Eintrag
+      allData[key].push({
+        id:          Date.now().toString(36) + Math.random().toString(36).slice(2,6),
+        description: desc, startTime, endTime, hours, minutes, category,
+        createdAt:   new Date().toISOString()
+      });
+    }
+
+    clearForm();
     renderCurrentDay();
     await saveData();
 
-    document.getElementById('desc').value      = '';
-    document.getElementById('startTime').value = '';
-    document.getElementById('endTime').value   = '';
-    document.getElementById('category').value  = '';
+    btn.disabled = false;
+    btn.textContent = '+ Eintrag hinzufügen';
     document.getElementById('desc').focus();
+  }
 
-    btn.disabled = false; btn.textContent = '+ Eintrag hinzufügen';
+  function editEntry(id) {
+    const entries = allData[toKey(currentDate)] || [];
+    const e = entries.find(e => e.id === id);
+    if (!e) return;
+
+    editingId = id;
+    document.getElementById('desc').value      = e.description || '';
+    document.getElementById('startTime').value = e.startTime   || '';
+    document.getElementById('endTime').value   = e.endTime     || '';
+    document.getElementById('category').value  = e.category    || '';
+
+    document.getElementById('formCardHeader').textContent = '✎ Eintrag bearbeiten';
+    document.getElementById('addBtn').textContent = '✓ Änderungen speichern';
+    document.getElementById('cancelEditBtn').style.display = 'block';
+
+    renderCurrentDay(); // highlight edited row
+    document.querySelector('.card').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    document.getElementById('desc').focus();
   }
 
   async function deleteEntry(id) {
+    if (editingId === id) clearForm();
     const key = toKey(currentDate);
     allData[key] = (allData[key] || []).filter(e => e.id !== id);
     if (!allData[key].length) delete allData[key];
@@ -920,6 +1026,7 @@
     currentDate = new Date(); updateHeader(); renderCurrentDay();
   });
   document.getElementById('addBtn').addEventListener('click', addEntry);
+  document.getElementById('cancelEditBtn').addEventListener('click', () => { clearForm(); renderCurrentDay(); });
   document.getElementById('resetBtn').addEventListener('click', resetToken);
 
   ['desc','startTime','endTime','category'].forEach(id =>
