@@ -812,14 +812,22 @@
       // Validate token
       await gh('GET', '/user');
 
-      // Create private Gist on first connect
+      // Vorhandenes Gist suchen oder neues erstellen
       if (!gistId) {
-        const gist = await gh('POST', '/gists', {
-          description: 'Arbeitsstunden-Tracker – Daten',
-          public: false,
-          files: { [GIST_FILE]: { content: '{}' } }
-        });
-        gistId = gist.id;
+        const allGists = await gh('GET', '/gists?per_page=100');
+        const existing = allGists.find(g =>
+          g.description === 'Arbeitsstunden-Tracker – Daten' && g.files[GIST_FILE]
+        );
+        if (existing) {
+          gistId = existing.id;  // vorhandenes Gist wiederverwenden
+        } else {
+          const gist = await gh('POST', '/gists', {
+            description: 'Arbeitsstunden-Tracker – Daten',
+            public: false,
+            files: { [GIST_FILE]: { content: '{}' } }
+          });
+          gistId = gist.id;
+        }
         localStorage.setItem(LS_GIST_ID, gistId);
       }
 
@@ -843,9 +851,9 @@
   }
 
   function resetToken() {
-    if (!confirm('Token und Gist-Verbindung zurücksetzen? Die gespeicherten Daten im Gist bleiben erhalten.')) return;
+    if (!confirm('Token zurücksetzen? Nur der Token wird entfernt – deine Daten und die Gist-Verbindung bleiben erhalten.')) return;
     localStorage.removeItem(LS_TOKEN);
-    localStorage.removeItem(LS_GIST_ID);
+    // gistId bewusst NICHT löschen – damit beim erneuten Verbinden dasselbe Gist verwendet wird
     location.reload();
   }
 
