@@ -642,13 +642,39 @@
     saving = on;
   }
 
+  async function findCorrectGist() {
+    // Richtiges Gist per Suche finden und gistId aktualisieren
+    const allGists = await gh('GET', '/gists?per_page=100');
+    const existing = allGists.find(g =>
+      g.description === 'Arbeitsstunden-Tracker – Daten' && g.files[GIST_FILE]
+    );
+    if (existing) {
+      gistId = existing.id;
+      localStorage.setItem(LS_GIST_ID, gistId);
+      return true;
+    }
+    return false;
+  }
+
   async function loadData() {
     showSync(true);
     try {
       const gist = await gh('GET', '/gists/' + gistId);
       allData = JSON.parse(gist.files[GIST_FILE]?.content || '{}');
     } catch(e) {
-      showAppError('Laden fehlgeschlagen: ' + e.message);
+      if (e.message.includes('Not Found') || e.message.includes('404')) {
+        // Gist-ID ist veraltet — richtiges Gist suchen
+        const found = await findCorrectGist();
+        if (found) {
+          const gist2 = await gh('GET', '/gists/' + gistId);
+          allData = JSON.parse(gist2.files[GIST_FILE]?.content || '{}');
+        } else {
+          localStorage.removeItem(LS_GIST_ID);
+          showAppError('Kein Gist gefunden. Bitte Token zurücksetzen und neu verbinden.');
+        }
+      } else {
+        showAppError('Laden fehlgeschlagen: ' + e.message);
+      }
     } finally {
       showSync(false);
     }
@@ -661,7 +687,19 @@
         files: { [GIST_FILE]: { content: JSON.stringify(allData, null, 2) } }
       });
     } catch(e) {
-      alert('Speichern fehlgeschlagen: ' + e.message);
+      if (e.message.includes('Not Found') || e.message.includes('404')) {
+        // Gist-ID veraltet — richtiges Gist suchen und nochmal speichern
+        const found = await findCorrectGist();
+        if (found) {
+          await gh('PATCH', '/gists/' + gistId, {
+            files: { [GIST_FILE]: { content: JSON.stringify(allData, null, 2) } }
+          });
+        } else {
+          alert('Kein Gist gefunden. Bitte Token zurücksetzen und neu verbinden.');
+        }
+      } else {
+        alert('Speichern fehlgeschlagen: ' + e.message);
+      }
     } finally {
       showSync(false);
     }
